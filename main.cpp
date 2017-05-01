@@ -190,7 +190,6 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
             {
                 cout<<"Detected ARP Packet!"<<endl;
                 arp_infection(snd_ip,snd_mac,trg_ip,trg_mac,1,fp);
-                break;
             }
             if(etype == ETHERTYPE_IP)
             {
