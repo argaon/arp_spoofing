@@ -98,6 +98,7 @@ void arp_infection(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,
         {
             fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
         }
+        if(ws == 0)
         sleep(1);
     }while(!quit);
     if(ws == 1)
