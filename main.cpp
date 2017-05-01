@@ -196,7 +196,7 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
             {
                 if(strcmp((char*)snd_mac,(char*)eh->Dst_mac)==0)
                 {
-                    if(!(u32_atk_ip == iph->saddr))
+                    if(u32_atk_ip != iph->saddr)
                     {
                         memcpy(eh->Dst_mac,rcv_mac,6);
                         memcpy(eh->Src_mac,snd_mac,6);
